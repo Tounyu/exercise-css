@@ -1,10 +1,5 @@
-use combine::{
-    choice,
-    error::StreamError,
-    many, many1, optional,
-    parser::char::{self, char, letter, newline, space},
-    sep_by, sep_end_by, ParseError, Parser, Stream,
-};
+use combine::{choice, error::StreamError, many, many1, optional, ParseError, Parser, parser::char::{self, letter}, sep_by, sep_end_by, Stream};
+use combine::parser::char::spaces;
 
 /// `Stylesheet` represents a single stylesheet.
 /// It consists of multiple rules, which are called "rule-list" in the standard (https://www.w3.org/TR/css-syntax-3/).
@@ -58,7 +53,8 @@ pub enum SimpleSelector {
 /// See https://www.w3.org/TR/selectors-3/#attribute-selectors to check the full list of available operators.
 #[derive(Debug, PartialEq)]
 pub enum AttributeSelectorOp {
-    Eq,      // =
+    Eq,
+    // =
     Contain, // ~=
 }
 
@@ -89,73 +85,129 @@ pub fn parse(raw: &str) -> Stylesheet {
         .unwrap()
 }
 
-fn rules<Input>() -> impl Parser<Input, Output = Vec<Rule>>
-where
-    Input: Stream<Token = char>,
-    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+fn rules<Input>() -> impl Parser<Input, Output=Vec<Rule>>
+    where
+        Input: Stream<Token=char>,
+        Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    todo!("you need to implement this");
-    (char(' ')).map(|_| vec![])
+    (
+        spaces(),
+        many(rule().skip(spaces())),
+    )
+        .map(|(_, rules)| rules)
 }
 
-fn rule<Input>() -> impl Parser<Input, Output = Rule>
-where
-    Input: Stream<Token = char>,
-    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+fn rule<Input>() -> impl Parser<Input, Output=Rule>
+    where
+        Input: Stream<Token=char>,
+        Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    todo!("you need to implement this");
-    (char(' '),).map(|_| Rule {
-        selectors: vec![],
-        declarations: vec![],
-    })
+    (
+        selectors().skip(spaces()),
+        char::char('{').skip(spaces()),
+        declarations().skip(spaces()),
+        char::char('}'),
+    )
+        .map(|(selectors, _, declarations, _)| Rule {
+            selectors,
+            declarations,
+        })
 }
 
-fn selectors<Input>() -> impl Parser<Input, Output = Vec<Selector>>
-where
-    Input: Stream<Token = char>,
-    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+fn selectors<Input>() -> impl Parser<Input, Output=Vec<Selector>>
+    where
+        Input: Stream<Token=char>,
+        Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    todo!("you need to implement this");
-    (char(' '),).map(|_| vec![])
+    sep_by(
+        simple_selector().skip(spaces()),
+        char::char(',').skip(spaces()),
+    )
 }
 
-fn simple_selector<Input>() -> impl Parser<Input, Output = SimpleSelector>
-where
-    Input: Stream<Token = char>,
-    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+fn simple_selector<Input>() -> impl Parser<Input, Output=SimpleSelector>
+    where
+        Input: Stream<Token=char>,
+        Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    todo!("you need to implement this");
-    (char(' '),).map(|_| SimpleSelector::UniversalSelector)
+    let universal_selector = char::char('*').map(|_| SimpleSelector::UniversalSelector);
+    let class_selector = (
+        char::char('.'),
+        many1(letter())
+    ).map(|(_, class_name)| SimpleSelector::ClassSelector { class_name });
+    let type_or_attribute_selector = (
+        many1(letter()).skip(spaces()),
+        optional((
+            char::char('[').skip(spaces()),
+            many1(letter()),
+            choice((char::string("="), char::string("~="))),
+            many1(letter()),
+            char::char(']'),
+        )),
+    )
+        .and_then(|(tag_name, opts)| match opts {
+            Some((_, attribute, op, value, _)) => {
+                let op = match op {
+                    "=" => AttributeSelectorOp::Eq,
+                    "~=" => AttributeSelectorOp::Contain,
+                    _ => {
+                        return Err(<Input::Error as ParseError<
+                            char,
+                            Input::Range,
+                            Input::Position,
+                        >>::StreamError::message_static_message(
+                            "invalid attribute selector op",
+                        ));
+                    }
+                };
+                Ok(SimpleSelector::AttributeSelector {
+                    tag_name,
+                    attribute,
+                    op,
+                    value,
+                })
+            }
+            None => Ok(SimpleSelector::TypeSelector { tag_name })
+        });
+
+    choice((
+        universal_selector,
+        class_selector,
+        type_or_attribute_selector,
+    ))
 }
 
-fn declarations<Input>() -> impl Parser<Input, Output = Vec<Declaration>>
-where
-    Input: Stream<Token = char>,
-    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+fn declarations<Input>() -> impl Parser<Input, Output=Vec<Declaration>>
+    where
+        Input: Stream<Token=char>,
+        Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    todo!("you need to implement this");
-    (char(' '),).map(|_| vec![])
+    sep_end_by(
+        declaration().skip(spaces()),
+        char::char(';').skip(spaces()),
+    )
 }
 
-fn declaration<Input>() -> impl Parser<Input, Output = Declaration>
-where
-    Input: Stream<Token = char>,
-    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+fn declaration<Input>() -> impl Parser<Input, Output=Declaration>
+    where
+        Input: Stream<Token=char>,
+        Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    todo!("you need to implement this");
-    (char(' '),).map(|_| Declaration {
-        name: "".into(),
-        value: CSSValue::Keyword("".into()),
-    })
+    (
+        many1(letter()).skip(spaces()),
+        char::char(':').skip(spaces()),
+        css_value()
+    )
+        .map(|(name, _, value)| Declaration { name, value })
 }
 
-fn css_value<Input>() -> impl Parser<Input, Output = CSSValue>
-where
-    Input: Stream<Token = char>,
-    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+fn css_value<Input>() -> impl Parser<Input, Output=CSSValue>
+    where
+        Input: Stream<Token=char>,
+        Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    todo!("you need to implement this");
-    (char(' '),).map(|_| CSSValue::Keyword("".into()))
+    let keyword = many1(letter()).map(|s| CSSValue::Keyword(s));
+    keyword
 }
 
 #[cfg(test)]
@@ -173,18 +225,18 @@ mod tests {
                             tag_name: "test".to_string(),
                             attribute: "foo".to_string(),
                             op: AttributeSelectorOp::Eq,
-                            value: "bar".to_string()
+                            value: "bar".to_string(),
                         }],
                         declarations: vec![
                             Declaration {
                                 name: "aa".to_string(),
-                                value: CSSValue::Keyword("bb".to_string())
+                                value: CSSValue::Keyword("bb".to_string()),
                             },
                             Declaration {
                                 name: "cc".to_string(),
                                 value: CSSValue::Keyword("dd".to_string()),
-                            }
-                        ]
+                            },
+                        ],
                     },
                     Rule {
                         selectors: vec![SimpleSelector::TypeSelector {
@@ -192,8 +244,8 @@ mod tests {
                         }],
                         declarations: vec![Declaration {
                             name: "ee".to_string(),
-                            value: CSSValue::Keyword("dd".to_string())
-                        }]
+                            value: CSSValue::Keyword("dd".to_string()),
+                        }],
                     },
                 ],
                 ""
@@ -211,9 +263,9 @@ mod tests {
                         tag_name: "test".to_string(),
                         attribute: "foo".to_string(),
                         op: AttributeSelectorOp::Eq,
-                        value: "bar".to_string()
+                        value: "bar".to_string(),
                     }],
-                    declarations: vec![]
+                    declarations: vec![],
                 },
                 ""
             ))
@@ -228,16 +280,16 @@ mod tests {
                             tag_name: "test".to_string(),
                             attribute: "foo".to_string(),
                             op: AttributeSelectorOp::Eq,
-                            value: "bar".to_string()
+                            value: "bar".to_string(),
                         },
                         SimpleSelector::AttributeSelector {
                             tag_name: "testtest".to_string(),
                             attribute: "piyo".to_string(),
                             op: AttributeSelectorOp::Contain,
-                            value: "guoo".to_string()
-                        }
+                            value: "guoo".to_string(),
+                        },
                     ],
-                    declarations: vec![]
+                    declarations: vec![],
                 },
                 ""
             ))
@@ -251,18 +303,18 @@ mod tests {
                         tag_name: "test".to_string(),
                         attribute: "foo".to_string(),
                         op: AttributeSelectorOp::Eq,
-                        value: "bar".to_string()
+                        value: "bar".to_string(),
                     }],
                     declarations: vec![
                         Declaration {
                             name: "aa".to_string(),
-                            value: CSSValue::Keyword("bb".to_string())
+                            value: CSSValue::Keyword("bb".to_string()),
                         },
                         Declaration {
                             name: "cc".to_string(),
                             value: CSSValue::Keyword("dd".to_string()),
-                        }
-                    ]
+                        },
+                    ],
                 },
                 ""
             ))
@@ -277,12 +329,12 @@ mod tests {
                 vec![
                     Declaration {
                         name: "foo".to_string(),
-                        value: CSSValue::Keyword("bar".to_string())
+                        value: CSSValue::Keyword("bar".to_string()),
                     },
                     Declaration {
                         name: "piyo".to_string(),
-                        value: CSSValue::Keyword("piyopiyo".to_string())
-                    }
+                        value: CSSValue::Keyword("piyopiyo".to_string()),
+                    },
                 ],
                 ""
             ))
@@ -299,11 +351,11 @@ mod tests {
                         tag_name: "test".to_string(),
                         attribute: "foo".to_string(),
                         op: AttributeSelectorOp::Eq,
-                        value: "bar".to_string()
+                        value: "bar".to_string(),
                     },
                     SimpleSelector::TypeSelector {
                         tag_name: "a".to_string(),
-                    }
+                    },
                 ],
                 ""
             ))
@@ -334,7 +386,7 @@ mod tests {
                     tag_name: "test".to_string(),
                     attribute: "foo".to_string(),
                     op: AttributeSelectorOp::Eq,
-                    value: "bar".to_string()
+                    value: "bar".to_string(),
                 },
                 ""
             ))
